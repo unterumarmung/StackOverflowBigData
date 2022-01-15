@@ -1,13 +1,25 @@
 package vsst;
 
 import java.time.OffsetDateTime;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
+
 
 public class Question {
     public int id;
     public OffsetDateTime creationDate;
-    public Answer[] answers;
-    public Tag[] tags;
+    public List<Answer> answers = new ArrayList<>();
+    public List<Tag> tags = new ArrayList<>();
+
+    public Question() {
+    }
+
+    public Question(int id, OffsetDateTime creationDate, List<Answer> answers, List<Tag> tags) {
+        this.id = id;
+        this.creationDate = creationDate;
+        this.answers = answers;
+        this.tags = tags;
+    }
 
     public static Question fromCsv(String line) {
         try {
@@ -19,7 +31,6 @@ public class Question {
         } catch (Exception e) {
             return null;
         }
-
     }
 
     @Override
@@ -27,8 +38,9 @@ public class Question {
         return "Question{" +
                 "id=" + id +
                 ", creationDate=" + creationDate +
-                ", answers=" + Arrays.toString(answers) +
-                ", tags=" + Arrays.toString(tags) +
+                ", answers=" + answers +
+                ", tags=" + tags +
                 '}';
     }
+
 }

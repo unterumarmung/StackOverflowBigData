@@ -1,10 +1,13 @@
 package vsst;
 
+import org.apache.commons.collections.ListUtils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
 import scala.Tuple2;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -44,13 +47,24 @@ public final class StackOverflow {
         return data.filter((line) -> !Objects.equals(line, header));
     }
 
+    private static Question reduceTags(Question lhs, Question rhs) {
+        return new Question(lhs.id, lhs.creationDate, lhs.answers, new ArrayList<Tag>(ListUtils.union(lhs.tags, rhs.tags)));
+    }
+
+    private static Question reduceAnswers(Question lhs, Question rhs) {
+        return new Question(lhs.id, lhs.creationDate, lhs.answers, new ArrayList<Tag>(ListUtils.union(lhs.answers, rhs.answers)));
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length != 1) {
             System.err.println("Usage: StackOverflow <output directory>");
             System.exit(1);
         }
 
-        SparkSession spark = SparkSession.builder().appName("StackOverflow").getOrCreate();
+        SparkSession spark = SparkSession.builder()
+                .appName("StackOverflow")
+                .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+                .getOrCreate();
 
 
         JavaRDD<String> rawQuestions = skipCsvHeader(spark.read().textFile(QUESTIONS_PATH).javaRDD());
@@ -61,7 +75,24 @@ public final class StackOverflow {
         JavaPairRDD<Integer, Answer> answers = rawAnswers.mapToPair(StackOverflow::parseAnswer).filter(Objects::nonNull);
         JavaPairRDD<Integer, Tag> tags = rawTags.mapToPair(StackOverflow::parseTag);
 
-        StackOverflow.debug(tags);
+        JavaPairRDD<Integer, Question> questionsWithTags = questions
+                .leftOuterJoin(tags)
+                .filter((questionWithTag) -> questionWithTag._2()._2().isPresent())
+                .mapValues(questionWithTag ->
+                        new Question(questionWithTag._1().id, questionWithTag._1().creationDate,
+                                questionWithTag._1().answers, new ArrayList<Tag>(Collections.singletonList(questionWithTag._2().get()))))
+                .reduceByKey(StackOverflow::reduceTags);
+
+        JavaPairRDD<Integer, Question> fullQuestions = questionsWithTags
+                .leftOuterJoin(answers)
+                .filter((questionWithAnswer) -> questionWithAnswer._2()._2().isPresent())
+                .mapValues(questionWithAnswer ->
+                        new Question(questionWithAnswer._1().id, questionWithAnswer._1().creationDate,
+                                new ArrayList<Answer>(Collections.singletonList(questionWithAnswer._2().get())), questionWithAnswer._1().tags))
+                .reduceByKey(StackOverflow::reduceAnswers);
+
+
+        debug(fullQuestions);
 
         spark.stop();
     }
