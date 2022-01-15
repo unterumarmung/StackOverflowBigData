@@ -6,10 +6,12 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
 import scala.Tuple2;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Objects;
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public final class StackOverflow {
     private static final Pattern SPACE = Pattern.compile(" ");
@@ -52,7 +54,37 @@ public final class StackOverflow {
     }
 
     private static Question reduceAnswers(Question lhs, Question rhs) {
-        return new Question(lhs.id, lhs.creationDate, lhs.answers, new ArrayList<Tag>(ListUtils.union(lhs.answers, rhs.answers)));
+        return new Question(lhs.id, lhs.creationDate, new ArrayList<Answer>(ListUtils.union(lhs.answers, rhs.answers)), lhs.tags);
+    }
+
+    private static JavaPairRDD<Tag, Duration> calculateMeanTimeForAnswer(JavaPairRDD<Integer, Question> questions) {
+        class CreationDates {
+            public CreationDates(OffsetDateTime question, List<OffsetDateTime> answers) {
+                this.question = question;
+                this.answers = answers;
+            }
+
+            OffsetDateTime question;
+            List<OffsetDateTime> answers;
+
+            @Override
+            public String toString() {
+                return "CreationDates{" +
+                        "question=" + question +
+                        ", answers=" + answers +
+                        '}';
+            }
+        }
+        JavaPairRDD<Tag, CreationDates> tagsToDates = questions
+                .values()
+                .flatMapToPair(question -> question.tags.stream()
+                        .map(tag ->
+                                new Tuple2<>(tag,
+                                        new CreationDates(question.creationDate,
+                                                question.answers.stream().map(answer -> answer.creationDate)
+                                                        .collect(Collectors.toList())))).iterator());
+        debug(tagsToDates);
+        return null;
     }
 
     public static void main(String[] args) throws Exception {
@@ -92,7 +124,7 @@ public final class StackOverflow {
                 .reduceByKey(StackOverflow::reduceAnswers);
 
 
-        debug(fullQuestions);
+        calculateMeanTimeForAnswer(fullQuestions);
 
         spark.stop();
     }
