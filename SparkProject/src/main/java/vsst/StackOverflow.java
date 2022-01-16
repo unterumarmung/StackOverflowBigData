@@ -102,6 +102,15 @@ public final class StackOverflow {
         return answer;
     }
 
+    private static JavaPairRDD<Tag, Long> calculateTopTags(JavaPairRDD<Integer, Question> questions) {
+        JavaPairRDD<Tag, Long> tagsCount = questions
+                .flatMapToPair(question -> question._2().tags.stream().map(tag -> new Tuple2<>(tag, (long)1)).iterator())
+                .reduceByKey((lhs, rhs) -> lhs + rhs);
+
+        // Sorted by value
+        return tagsCount.mapToPair(Tuple2::swap).sortByKey(/* ascending = */ false).mapToPair(Tuple2::swap);
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length != 1) {
             System.err.println("Usage: StackOverflow <output directory>");
@@ -138,10 +147,10 @@ public final class StackOverflow {
                 .mapValues(questionWithAnswer ->
                         new Question(questionWithAnswer._1().id, questionWithAnswer._1().creationDate,
                                 new ArrayList<Answer>(Collections.singletonList(questionWithAnswer._2().get())), questionWithAnswer._1().tags))
-                .reduceByKey(StackOverflow::reduceAnswers);
-
+                .reduceByKey(StackOverflow::reduceAnswers).cache();
 
         calculateMeanTimeForAnswer(fullQuestions).saveAsTextFile(outputPath + "/" + "mean_time_answer");
+        calculateTopTags(fullQuestions).saveAsTextFile(outputPath + "/" + "top_tags");
 
         spark.stop();
     }
