@@ -11,7 +11,6 @@ import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public final class StackOverflow {
     private static final Pattern SPACE = Pattern.compile(" ");
@@ -57,15 +56,15 @@ public final class StackOverflow {
         return new Question(lhs.id, lhs.creationDate, new ArrayList<Answer>(ListUtils.union(lhs.answers, rhs.answers)), lhs.tags);
     }
 
-    private static JavaPairRDD<Tag, Duration> calculateMeanTimeForAnswer(JavaPairRDD<Integer, Question> questions) {
+
+    private static JavaPairRDD<Tag, Long> calculateMeanTimeForAnswer(JavaPairRDD<Integer, Question> questions) {
         class CreationDates {
+            OffsetDateTime question;
+            List<OffsetDateTime> answers;
             public CreationDates(OffsetDateTime question, List<OffsetDateTime> answers) {
                 this.question = question;
                 this.answers = answers;
             }
-
-            OffsetDateTime question;
-            List<OffsetDateTime> answers;
 
             @Override
             public String toString() {
@@ -83,8 +82,24 @@ public final class StackOverflow {
                                         new CreationDates(question.creationDate,
                                                 question.answers.stream().map(answer -> answer.creationDate)
                                                         .collect(Collectors.toList())))).iterator());
-        debug(tagsToDates);
-        return null;
+
+        JavaPairRDD<Tag, Long> tagToAnswerTime = tagsToDates
+                .mapValues(date -> date.answers.stream()
+                        // find first answer for a question
+                        .map(dateAnswer -> Duration.between(date.question, dateAnswer)).sorted().findFirst())
+                .filter(duration -> duration._2().isPresent())
+                .mapValues(Optional::get)
+                .mapValues(Duration::toMinutes);
+
+        JavaPairRDD<Tag, Long> totalTimeByTag = tagToAnswerTime.reduceByKey((lhs, rhs) -> lhs + rhs);
+        JavaPairRDD<Tag, Long> answersByTag = tagToAnswerTime
+                .mapValues(minutes -> (long) 1)
+                .reduceByKey((lhs, rhs) -> lhs + rhs);
+
+        JavaPairRDD<Tag, Long> answer = totalTimeByTag.join(answersByTag)
+                .mapValues(totalWithCount -> totalWithCount._1() / totalWithCount._2());
+
+        return answer;
     }
 
     public static void main(String[] args) throws Exception {
@@ -92,6 +107,8 @@ public final class StackOverflow {
             System.err.println("Usage: StackOverflow <output directory>");
             System.exit(1);
         }
+
+        String outputPath = args[0];
 
         SparkSession spark = SparkSession.builder()
                 .appName("StackOverflow")
@@ -124,7 +141,7 @@ public final class StackOverflow {
                 .reduceByKey(StackOverflow::reduceAnswers);
 
 
-        calculateMeanTimeForAnswer(fullQuestions);
+        calculateMeanTimeForAnswer(fullQuestions).saveAsTextFile(outputPath + "/" + "mean_time_answer");
 
         spark.stop();
     }
