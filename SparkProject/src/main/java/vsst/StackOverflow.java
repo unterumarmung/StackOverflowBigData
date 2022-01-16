@@ -17,6 +17,7 @@ public final class StackOverflow {
     private static final String QUESTIONS_PATH = "/datasets/2021/stackoverflow-sample/Questions.csv";
     private static final String ANSWERS_PATH = "/datasets/2021/stackoverflow-sample/Answers.csv";
     private static final String TAGS_PATH = "/datasets/2021/stackoverflow-sample/Tags.csv";
+    private static final Duration DAY = Duration.ofDays(1);
 
     private static Tuple2<Integer, Question> parseQuestion(String line) {
         Question question = Question.fromCsv(line);
@@ -57,10 +58,11 @@ public final class StackOverflow {
     }
 
 
-    private static JavaPairRDD<Tag, Long> calculateMeanTimeForAnswer(JavaPairRDD<Integer, Question> questions) {
+    private static JavaPairRDD<Tag, Tuple2<Long, Double>> calculateMeanTimeForAnswer(JavaPairRDD<Integer, Question> questions) {
         class CreationDates {
             OffsetDateTime question;
             List<OffsetDateTime> answers;
+
             public CreationDates(OffsetDateTime question, List<OffsetDateTime> answers) {
                 this.question = question;
                 this.answers = answers;
@@ -91,27 +93,38 @@ public final class StackOverflow {
                 .mapValues(Optional::get)
                 .mapValues(Duration::toMinutes);
 
-        JavaPairRDD<Tag, Long> totalTimeByTag = tagToAnswerTime.reduceByKey((lhs, rhs) -> lhs + rhs);
-        JavaPairRDD<Tag, Long> answersByTag = tagToAnswerTime
+        JavaPairRDD<Tag, Long> totalAnswersByTag = tagToAnswerTime
                 .mapValues(minutes -> (long) 1)
                 .reduceByKey((lhs, rhs) -> lhs + rhs);
 
-        JavaPairRDD<Tag, Long> answer = totalTimeByTag.join(answersByTag)
+        JavaPairRDD<Tag, Long> dayTagAndTime = tagToAnswerTime
+                .filter(tagAndTime -> tagAndTime._2().compareTo(DAY.toMinutes()) < 0);
+
+        JavaPairRDD<Tag, Long> dayTimeByTag = dayTagAndTime.reduceByKey((lhs, rhs) -> lhs + rhs);
+        JavaPairRDD<Tag, Long> dayAnswersByTag = dayTagAndTime
+                .mapValues(minutes -> (long) 1)
+                .reduceByKey((lhs, rhs) -> lhs + rhs);
+
+        JavaPairRDD<Tag, Long> dayAnswer = dayTimeByTag.join(dayAnswersByTag)
                 .mapValues(totalWithCount -> totalWithCount._1() / totalWithCount._2());
 
-        return answer;
+        JavaPairRDD<Tag, Double> probability = dayAnswersByTag
+                .join(totalAnswersByTag)
+                .mapValues(counts -> counts._1().doubleValue() / counts._2().doubleValue());
+
+        return dayAnswer.join(probability);
     }
 
     private static JavaPairRDD<Tag, Long> calculateTopTags(JavaPairRDD<Integer, Question> questions) {
         JavaPairRDD<Tag, Long> tagsCount = questions
-                .flatMapToPair(question -> question._2().tags.stream().map(tag -> new Tuple2<>(tag, (long)1)).iterator())
+                .flatMapToPair(question -> question._2().tags.stream().map(tag -> new Tuple2<>(tag, (long) 1)).iterator())
                 .reduceByKey((lhs, rhs) -> lhs + rhs);
 
         // Sorted by value
         return tagsCount.mapToPair(Tuple2::swap).sortByKey(/* ascending = */ false).mapToPair(Tuple2::swap);
     }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         if (args.length != 1) {
             System.err.println("Usage: StackOverflow <output directory>");
             System.exit(1);
