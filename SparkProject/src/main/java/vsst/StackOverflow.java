@@ -121,7 +121,7 @@ public final class StackOverflow {
                 .reduceByKey((lhs, rhs) -> lhs + rhs);
 
         // Sorted by value
-        return tagsCount.mapToPair(Tuple2::swap).sortByKey(/* ascending = */ false).mapToPair(Tuple2::swap);
+        return tagsCount.mapToPair(Tuple2::swap).cache().sortByKey(/* ascending = */ false).mapToPair(Tuple2::swap);
     }
 
     public static void main(String[] args) {
