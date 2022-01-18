@@ -6,6 +6,7 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
 import scala.Tuple2;
 
+import java.math.BigInteger;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -88,25 +89,27 @@ public final class StackOverflow {
         JavaPairRDD<Tag, Long> tagToAnswerTime = tagsToDates
                 .mapValues(date -> date.answers.stream()
                         // find first answer for a question
-                        .map(dateAnswer -> Duration.between(date.question, dateAnswer)).sorted().findFirst())
+                        .map(dateAnswer -> Duration.between(date.question, dateAnswer).abs()).sorted().findFirst())
                 .filter(duration -> duration._2().isPresent())
                 .mapValues(Optional::get)
                 .mapValues(Duration::toMinutes);
 
-        JavaPairRDD<Tag, Long> totalAnswersByTag = tagToAnswerTime
-                .mapValues(minutes -> (long) 1)
-                .reduceByKey((lhs, rhs) -> lhs + rhs);
+        JavaPairRDD<Tag, BigInteger> totalAnswersByTag = tagToAnswerTime
+                .mapValues(minutes -> BigInteger.ONE)
+                .reduceByKey((lhs, rhs) -> lhs.add(rhs));
 
         JavaPairRDD<Tag, Long> dayTagAndTime = tagToAnswerTime
                 .filter(tagAndTime -> tagAndTime._2().compareTo(DAY.toMinutes()) < 0);
 
-        JavaPairRDD<Tag, Long> dayTimeByTag = dayTagAndTime.reduceByKey((lhs, rhs) -> lhs + rhs);
-        JavaPairRDD<Tag, Long> dayAnswersByTag = dayTagAndTime
-                .mapValues(minutes -> (long) 1)
-                .reduceByKey((lhs, rhs) -> lhs + rhs);
+        JavaPairRDD<Tag, BigInteger> dayTimeByTag = dayTagAndTime
+                .mapValues(time -> BigInteger.valueOf(time))
+                .reduceByKey((lhs, rhs) -> lhs.add(rhs));
+        JavaPairRDD<Tag, BigInteger> dayAnswersByTag = dayTagAndTime
+                .mapValues(minutes -> BigInteger.ONE)
+                .reduceByKey((lhs, rhs) -> lhs.add(rhs));
 
         JavaPairRDD<Tag, Long> dayAnswer = dayTimeByTag.join(dayAnswersByTag)
-                .mapValues(totalWithCount -> totalWithCount._1() / totalWithCount._2());
+                .mapValues(totalWithCount -> totalWithCount._1().divide(totalWithCount._2()).longValue());
 
         JavaPairRDD<Tag, Double> probability = dayAnswersByTag
                 .join(totalAnswersByTag)
